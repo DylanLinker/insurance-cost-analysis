@@ -1,0 +1,12 @@
+Average Charges = AVERAGE(policies[charges])
+
+Smoker Average =
+CALCULATE([Average Charges], policies[smoker] = "yes")
+
+Non-Smoker Average =
+CALCULATE([Average Charges], policies[smoker] = "no")
+
+Smoker Multiple =
+DIVIDE([Smoker Average], [Non-Smoker Average])
+
+Policy Count = COUNTROWS(policies)
