@@ -3,6 +3,7 @@
 Each row is one policyholder: age, sex, bmi, children, smoker, region, charges.
 """
 
+import math
 import sqlite3
 import urllib.request
 from pathlib import Path
@@ -128,6 +129,20 @@ def write_excel(frame: pd.DataFrame, path: Path) -> None:
     workbook.save(path)
 
 
+def welch_ttest(left: list[float], right: list[float]) -> tuple[float, float]:
+    """Two-sample t test without assuming equal variance."""
+    n1, n2 = len(left), len(right)
+    mean1 = sum(left) / n1
+    mean2 = sum(right) / n2
+    var1 = sum((value - mean1) ** 2 for value in left) / (n1 - 1)
+    var2 = sum((value - mean2) ** 2 for value in right) / (n2 - 1)
+    standard_error = math.sqrt(var1 / n1 + var2 / n2)
+    t_stat = (mean1 - mean2) / standard_error
+    numerator = (var1 / n1 + var2 / n2) ** 2
+    denominator = (var1 / n1) ** 2 / (n1 - 1) + (var2 / n2) ** 2 / (n2 - 1)
+    return t_stat, numerator / denominator
+
+
 def main() -> None:
     frame = load_policies()
     write_database(frame)
@@ -137,9 +152,20 @@ def main() -> None:
 
     yes = by_smoker.loc[by_smoker["smoker"] == "yes", "avg_charges"].iloc[0]
     no = by_smoker.loc[by_smoker["smoker"] == "no", "avg_charges"].iloc[0]
+    smoker_charges = frame.loc[frame["smoker"] == "yes", "charges"].tolist()
+    other_charges = frame.loc[frame["smoker"] == "no", "charges"].tolist()
+    t_stat, degrees = welch_ttest(smoker_charges, other_charges)
+    nonsmoker_region = by_region.loc[by_region["smoker"] == "no", "avg_charges"]
+
     print(f"policies {len(frame)}")
     print(by_smoker.to_string(index=False))
     print(f"smoker_to_nonsmoker_ratio {yes / no:.2f}")
+    print(f"welch_t {t_stat:.2f}")
+    print(f"welch_df {degrees:.1f}")
+    print(
+        "nonsmoker_region_span "
+        f"{nonsmoker_region.max() - nonsmoker_region.min():.0f}"
+    )
     print(by_region.to_string(index=False))
     print(f"wrote {OUTPUT / 'policies.csv'}")
     print(f"wrote {OUTPUT / 'policies.xlsx'}")
