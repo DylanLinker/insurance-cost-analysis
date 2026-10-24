@@ -34,3 +34,15 @@ SELECT region,
 FROM policies
 GROUP BY region, smoker
 ORDER BY avg_charges DESC;
+
+SELECT CASE
+           WHEN age <= 29 THEN '18-29'
+           WHEN age <= 44 THEN '30-44'
+           ELSE '45-64'
+       END AS age_band,
+       smoker,
+       COUNT(*) AS policies,
+       ROUND(AVG(charges), 2) AS avg_charges
+FROM policies
+GROUP BY age_band, smoker
+ORDER BY age_band, avg_charges DESC;

@@ -26,3 +26,13 @@ cat(sprintf("nonsmoker_region_span %.0f\n", region_span))
 
 result <- t.test(smokers, others)
 print(result)
+
+policies$smoker_yes <- ifelse(policies$smoker == "yes", 1, 0)
+policies$sex_male <- ifelse(policies$sex == "male", 1, 0)
+fit <- lm(
+  charges ~ smoker_yes + age + bmi + children + sex_male + factor(region),
+  data = policies
+)
+cat(sprintf("adjusted_smoker_dollars %.2f\n", coef(fit)[["smoker_yes"]]))
+cat(sprintf("age_10_year_dollars %.2f\n", coef(fit)[["age"]] * 10))
+cat(sprintf("model_r2 %.3f\n", summary(fit)$r.squared))

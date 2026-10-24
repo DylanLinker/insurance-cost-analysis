@@ -32,3 +32,15 @@ proc ttest data=policies alpha=0.05;
     class smoker;
     var charges;
 run;
+
+data policies_model;
+    set policies;
+    smoker_yes = (upcase(smoker) = "YES");
+    sex_male = (upcase(sex) = "MALE");
+run;
+
+proc glm data=policies_model;
+    class region;
+    model charges = smoker_yes age bmi children sex_male region / solution;
+run;
+quit;

@@ -8,6 +8,7 @@ import sqlite3
 import urllib.request
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.chart import BarChart, Reference
@@ -42,6 +43,20 @@ SELECT region,
 FROM policies
 GROUP BY region, smoker
 ORDER BY avg_charges DESC
+"""
+
+AGE_SQL = """
+SELECT CASE
+           WHEN age <= 29 THEN '18-29'
+           WHEN age <= 44 THEN '30-44'
+           ELSE '45-64'
+       END AS age_band,
+       smoker,
+       COUNT(*) AS policies,
+       ROUND(AVG(charges), 2) AS avg_charges
+FROM policies
+GROUP BY age_band, smoker
+ORDER BY age_band, avg_charges DESC
 """
 
 
@@ -126,6 +141,36 @@ def write_excel(frame: pd.DataFrame, path: Path) -> None:
     chart.dataLabels.showVal = False
     chart.legend = None
     summary.add_chart(chart, "A9")
+
+    bands = workbook.create_sheet("age bands", 1)
+    bands["A1"] = "Average charges by age band"
+    bands["A1"].font = Font(bold=True, size=14)
+    bands["A3"] = "age band"
+    bands["B3"] = "smoker"
+    bands["C3"] = "policies"
+    bands["D3"] = "average charges"
+    for cell in ("A3", "B3", "C3", "D3"):
+        bands[cell].font = Font(bold=True)
+    band_rows = (("18-29", 18, 29), ("30-44", 30, 44), ("45-64", 45, 64))
+    row_number = 4
+    for label, low, high in band_rows:
+        for smoker in ("yes", "no"):
+            bands[f"A{row_number}"] = label
+            bands[f"B{row_number}"] = smoker
+            bands[f"C{row_number}"] = (
+                f'=COUNTIFS(Policies[smoker],"{smoker}",'
+                f'Policies[age],">={low}",Policies[age],"<={high}")'
+            )
+            bands[f"D{row_number}"] = (
+                f'=AVERAGEIFS(Policies[charges],Policies[smoker],"{smoker}",'
+                f'Policies[age],">={low}",Policies[age],"<={high}")'
+            )
+            bands[f"D{row_number}"].number_format = '"$"#,##0.00'
+            row_number += 1
+    bands.column_dimensions["A"].width = 22
+    bands.column_dimensions["B"].width = 12
+    bands.column_dimensions["C"].width = 14
+    bands.column_dimensions["D"].width = 20
     workbook.save(path)
 
 
@@ -143,12 +188,41 @@ def welch_ttest(left: list[float], right: list[float]) -> tuple[float, float]:
     return t_stat, numerator / denominator
 
 
+def adjusted_smoking_gap(frame: pd.DataFrame) -> tuple[float, float, float]:
+    """OLS of charges on smoking, age, BMI, children, sex, and region.
+
+    Northeast is the region baseline. Returns the smoking coefficient,
+    the cost of 10 additional years of age, and R-squared.
+    """
+    smoker = (frame["smoker"] == "yes").astype(float)
+    sex_male = (frame["sex"] == "male").astype(float)
+    region = pd.get_dummies(frame["region"], dtype=float).drop(columns=["northeast"])
+    design = np.column_stack(
+        [
+            np.ones(len(frame)),
+            smoker.to_numpy(),
+            frame["age"].to_numpy(),
+            frame["bmi"].to_numpy(),
+            frame["children"].to_numpy(),
+            sex_male.to_numpy(),
+            region.to_numpy(),
+        ]
+    )
+    charges = frame["charges"].to_numpy()
+    coefficients, *_ = np.linalg.lstsq(design, charges, rcond=None)
+    fitted = design @ coefficients
+    residual = float(((charges - fitted) ** 2).sum())
+    total = float(((charges - charges.mean()) ** 2).sum())
+    return float(coefficients[1]), float(coefficients[2] * 10), 1 - residual / total
+
+
 def main() -> None:
     frame = load_policies()
     write_database(frame)
     write_outputs(frame)
     by_smoker = query(SUMMARY_SQL)
     by_region = query(REGION_SQL)
+    by_age = query(AGE_SQL)
 
     yes = by_smoker.loc[by_smoker["smoker"] == "yes", "avg_charges"].iloc[0]
     no = by_smoker.loc[by_smoker["smoker"] == "no", "avg_charges"].iloc[0]
@@ -156,6 +230,9 @@ def main() -> None:
     other_charges = frame.loc[frame["smoker"] == "no", "charges"].tolist()
     t_stat, degrees = welch_ttest(smoker_charges, other_charges)
     nonsmoker_region = by_region.loc[by_region["smoker"] == "no", "avg_charges"]
+    smoker_gap, age_10_years, r_squared = adjusted_smoking_gap(frame)
+    smoker_median = float(frame.loc[frame["smoker"] == "yes", "charges"].median())
+    other_median = float(frame.loc[frame["smoker"] == "no", "charges"].median())
 
     print(f"policies {len(frame)}")
     print(by_smoker.to_string(index=False))
@@ -167,6 +244,12 @@ def main() -> None:
         f"{nonsmoker_region.max() - nonsmoker_region.min():.0f}"
     )
     print(by_region.to_string(index=False))
+    print(f"smoker_median {smoker_median:.2f}")
+    print(f"nonsmoker_median {other_median:.2f}")
+    print(f"adjusted_smoker_dollars {smoker_gap:.2f}")
+    print(f"age_10_year_dollars {age_10_years:.2f}")
+    print(f"model_r2 {r_squared:.3f}")
+    print(by_age.to_string(index=False))
     print(f"wrote {OUTPUT / 'policies.csv'}")
     print(f"wrote {OUTPUT / 'policies.xlsx'}")
 

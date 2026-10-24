@@ -15,6 +15,12 @@ let
             {"region", type text},
             {"charges", type number}
         }
+    ),
+    Banded = Table.AddColumn(
+        Typed,
+        "age_band",
+        each if [age] <= 29 then "18-29" else if [age] <= 44 then "30-44" else "45-64",
+        type text
     )
 in
-    Typed
+    Banded
